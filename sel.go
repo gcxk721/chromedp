@@ -285,18 +285,6 @@ func (s *Selector) waitReady(check func(context.Context, *TargetHandler, *cdp.No
 	}
 }
 
-// waitLoaded waits for the page to be ready.
-func (s *Selector) waitLoaded(check func(context.Context, *TargetHandler, *cdp.Node) error) func(context.Context, *TargetHandler, *cdp.Node, ...cdp.NodeID) ([]*cdp.Node, error) {
-	return func(ctxt context.Context, h *TargetHandler, n *cdp.Node, ids ...cdp.NodeID) ([]*cdp.Node, error) {
-		f, err := h.WaitFrame(ctxt, cdp.EmptyFrameID)
-		if err != nil {
-			return nil, err
-		}
-		println(f.State)
-		return nil, nil
-	}
-}
-
 // WaitFunc is a query option to set a custom wait func.
 func WaitFunc(wait func(context.Context, *TargetHandler, *cdp.Node, ...cdp.NodeID) ([]*cdp.Node, error)) QueryOption {
 	return func(s *Selector) {
@@ -455,8 +443,29 @@ func WaitNotPresent(sel interface{}, opts ...QueryOption) Action {
 // WaitLoaded 等待整个页面加载完毕
 func WaitLoaded() Action {
 	s := &Selector{
-		exp: 1,
+		exp: 0,
+		by: func(i context.Context, handler *TargetHandler, node *cdp.Node) ([]cdp.NodeID, error) {
+			time.Sleep(1 * time.Second)
+			return []cdp.NodeID{}, nil
+		},
+		wait: func(i context.Context, handler *TargetHandler, node *cdp.Node, id ...cdp.NodeID) ([]*cdp.Node, error) {
+			for {
+				select {
+				default:
+					f, err := handler.WaitFrame(i, cdp.EmptyFrameID)
+					if err != nil {
+						return nil, err
+					}
+					if handler.IsLoadEnd(f.ID) {
+						return nil, nil
+					}
+					time.Sleep(DefaultCheckDuration)
+				case <-i.Done():
+					return nil, i.Err()
+				}
+			}
+			return nil, nil
+		},
 	}
-	WaitFunc(s.waitLoaded(nil))(s)
 	return s
 }

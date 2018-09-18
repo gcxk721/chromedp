@@ -31,6 +31,9 @@ type TargetHandler struct {
 	// frames is the set of encountered frames.
 	frames map[cdp.FrameID]*cdp.Frame
 
+	//end map
+	end map[cdp.FrameID]bool
+
 	// cur is the current top level frame.
 	cur *cdp.Frame
 
@@ -84,6 +87,7 @@ func NewTargetHandler(t client.Target, logf, debugf, errf func(string, ...interf
 func (h *TargetHandler) Run(ctxt context.Context) error {
 	// reset
 	h.Lock()
+	h.end = make(map[cdp.FrameID]bool)
 	h.frames = make(map[cdp.FrameID]*cdp.Frame)
 	h.qcmd = make(chan *cdproto.Message)
 	h.qres = make(chan *cdproto.Message)
@@ -437,6 +441,22 @@ func (h *TargetHandler) SetActive(ctxt context.Context, id cdp.FrameID) error {
 	return nil
 }
 
+func (h *TargetHandler) IsLoadEnd(id cdp.FrameID) bool {
+	h.RLock()
+	defer h.RUnlock()
+	var f *cdp.Frame
+	var ok bool
+	if id == cdp.EmptyFrameID {
+		f, ok = h.cur, h.cur != nil
+	} else {
+		f, ok = h.frames[id]
+	}
+	if ok {
+		return h.end[f.ID]
+	}
+	return false
+}
+
 // WaitFrame waits for a frame to be loaded using the provided context.
 func (h *TargetHandler) WaitFrame(ctxt context.Context, id cdp.FrameID) (*cdp.Frame, error) {
 	// TODO: fix this
@@ -563,6 +583,12 @@ func (h *TargetHandler) pageEvent(ctxt context.Context, ev interface{}) {
 	f.Lock()
 	defer f.Unlock()
 
+	switch e := ev.(type) {
+	case *page.EventFrameStartedLoading:
+		h.end[e.FrameID] = false
+	case *page.EventFrameStoppedLoading:
+		h.end[e.FrameID] = true
+	}
 	op(f)
 }
 
